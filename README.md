@@ -1,226 +1,364 @@
-# 🤖🎓 EpidBot-OpenMAIC Integration
+# EpidBot-OpenMAIC Bridge
 
 > **AI-Powered Epidemiological Education Platform**
-> 
-> Integrating EpidBot's real-time disease surveillance capabilities with OpenMAIC's multi-agent interactive classroom platform for immersive public health training.
+>
+> A bridge service that generates epidemiological training content using real SINAN surveillance data and OpenMAIC's multi-agent classroom platform.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![OpenClaw Compatible](https://img.shields.io/badge/OpenClaw-Compatible-green.svg)](https://github.com/openclaw)
 
 ---
 
-## 🌟 Overview
+## Overview
 
-This project creates a bridge between two powerful open-source platforms:
+This project creates a bridge between two powerful platforms:
 
-- **[EpidBot](https://github.com/Deeplearn-PeD/EpiDBot)** - AI assistant for epidemiology with real-time access to disease surveillance data (SINAN, HealthMap, WHO, etc.)
-- **[OpenMAIC](https://github.com/THU-MAIC/OpenMAIC)** - Multi-agent interactive classroom platform from Tsinghua University
+- **[EpidBot](https://github.com/Deelearn-PeD/EpiDBot)** - AI assistant for epidemiology with access to disease surveillance data (SINAN, WHO, etc.)
+- **[OpenMAIC](https://github.com/THU-MAIC/OpenMAIC)** - Multi-agent interactive classroom platform
 
-### 🎯 Vision
-
-Transform public health education by creating immersive, data-driven learning experiences where:
-- AI teachers deliver dynamic lessons on disease surveillance
-- AI classmates engage in realistic scenario discussions
-- Real epidemiological data powers simulations and case studies
-- Students learn by analyzing actual outbreak data
+The bridge fetches real epidemiological data, generates rich training content, and creates interactive classrooms via OpenMAIC's API.
 
 ---
 
-## 🚀 Key Features (Planned)
+## Features
 
-| Feature | Description | Status |
-|---------|-------------|--------|
-| **Dynamic Content Generation** | Auto-generate lessons from real surveillance data | 🔮 Phase 1 |
-| **AI-Powered Simulations** | Interactive outbreak scenarios with real data | 🔮 Phase 2 |
-| **Multi-Agent Discussions** | AI classmates debate strategies using live data | 🔮 Phase 2 |
-| **Smart Quizzes** | Auto-generated assessments based on current epidemics | 🔮 Phase 1 |
-| **Real-Time Dashboard** | Live disease metrics during lessons | 🔮 Phase 3 |
-| **Certification System** | Completion certificates for health professionals | 🔮 Phase 3 |
+| Feature | Status |
+|---------|--------|
+| Fetch dengue data from SINAN via PySUS | Done |
+| Generate training requirement strings with real statistics | Done |
+| Submit classroom generation jobs to OpenMAIC | Done |
+| Poll job status and retrieve classroom URLs | Done |
+| REST API with FastAPI | Done |
+| Multi-disease support (Zika, Chikungunya, etc.) | Planned |
+| Interactive outbreak simulations | Planned |
+| Export to PPTX/PDF | Planned |
 
 ---
 
-## 📋 Quick Start
+## Prerequisites
+
+1. **Python 3.12+**
+2. **uv** package manager ([install guide](https://docs.astral.sh/uv/))
+3. **OpenMAIC** running at `localhost:3000` (or configure `OPENMAIC_URL`)
+
+---
+
+## Quick Start
+
+### 1. Clone and Install
 
 ```bash
-# Clone the repository
 git clone https://github.com/deeplearn/EpidBot-OpenMAIC.git
 cd EpidBot-OpenMAIC
 
-# Install dependencies
-pip install -e ".[dev]"
+# Install dependencies with uv
+uv sync
+```
 
-# Configure environment
+### 2. Configure Environment
+
+```bash
 cp .env.example .env
-# Edit .env with your API keys
+```
 
-# Run integration test
-python examples/test_integration.py
+Edit `.env` if needed:
+```bash
+# OpenMAIC Configuration
+OPENMAIC_URL=http://localhost:3000
+
+# PySUS Data Cache Directory
+PYSUS_DATA_PATH=~/pysus
+
+# Server Configuration
+HOST=0.0.0.0
+PORT=8000
+```
+
+### 3. Start the Bridge Service
+
+```bash
+# Using the configured script
+uv run serve
+
+# Or directly with uvicorn
+uv run uvicorn src.main:app --reload --port 8000
+```
+
+### 4. Verify the Service
+
+```bash
+curl http://localhost:8000/health
+```
+
+Expected response:
+```json
+{
+  "status": "ok",
+  "service": "epidbot-openmaic-bridge",
+  "openmaic_connected": true
+}
 ```
 
 ---
 
-## 🗺️ Repository Structure
+## API Endpoints
+
+### Health Check
+
+```bash
+GET /health
+```
+
+Returns service status and OpenMAIC connectivity.
+
+---
+
+### Generate Dengue Training
+
+```bash
+POST /api/generate-dengue-training
+```
+
+Generate a dengue training classroom with real SINAN data.
+
+**Request Body:**
+```json
+{
+  "region": "São Paulo",
+  "year": 2024,
+  "state": "SP",
+  "language": "pt-BR",
+  "target_audience": "agentes de saúde",
+  "num_slides": 8,
+  "num_quizzes": 3
+}
+```
+
+**Response:**
+```json
+{
+  "job_id": "abc123",
+  "status": "processing",
+  "data_summary": {
+    "total_cases": 12345,
+    "deaths": 15,
+    "hospitalizations": 234,
+    "fatality_rate": 0.12
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X POST http://localhost:8000/api/generate-dengue-training \
+  -H "Content-Type: application/json" \
+  -d '{"region": "São Paulo", "year": 2024, "state": "SP"}'
+```
+
+---
+
+### Poll Job Status
+
+```bash
+GET /api/job/{job_id}
+```
+
+Check the status of a classroom generation job.
+
+**Response:**
+```json
+{
+  "job_id": "abc123",
+  "status": "completed",
+  "progress": 100,
+  "classroom_url": "http://localhost:3000/classroom/xyz",
+  "classroom_id": "xyz"
+}
+```
+
+**Status Values:**
+- `queued` - Job is waiting to start
+- `processing` - Job is running
+- `completed` - Job finished successfully
+- `failed` - Job encountered an error
+
+---
+
+### Get Classroom
+
+```bash
+GET /api/classroom/{classroom_id}
+```
+
+Retrieve the full classroom data after generation completes.
+
+---
+
+## Running the Demo
+
+The demo script demonstrates the end-to-end flow:
+
+```bash
+# Make sure the bridge service is running first
+uv run serve &
+
+# Run the demo
+uv run python scripts/demo.py
+```
+
+The demo will:
+1. Check service health
+2. Submit a dengue training generation request
+3. Poll for completion
+4. Display the classroom URL when ready
+
+---
+
+## Running Tests
+
+```bash
+# Run all tests
+uv run pytest
+
+# Run with verbose output
+uv run pytest tests/ -v
+
+# Run specific test file
+uv run pytest tests/test_basic.py -v
+```
+
+---
+
+## Project Structure
 
 ```
 EpidBot-OpenMAIC/
-├── 📁 docs/                    # Documentation
-│   ├── IMPLEMENTATION_PLAN.md  # Detailed roadmap
-│   ├── ARCHITECTURE.md         # Technical architecture
-│   ├── USE_CASES.md            # Usage scenarios
-│   └── API_REFERENCE.md        # API documentation
-├── 📁 src/                     # Source code
-│   ├── integration/            # Core integration module
-│   ├── adapters/               # Platform adapters
-│   ├── content_generators/     # Lesson content generators
-│   └── utils/                  # Utilities
-├── 📁 examples/                # Example scripts
-├── 📁 tests/                   # Test suite
-├── 📁 deployments/             # Deployment configs
-└── 📁 notebooks/               # Jupyter notebooks
+├── pyproject.toml          # Project config (uv-compatible)
+├── .env.example            # Environment template
+├── .env                    # Local configuration
+├── uv.lock                 # Dependency lock file
+├── src/
+│   ├── __init__.py
+│   ├── config.py           # Pydantic settings
+│   ├── main.py             # FastAPI application
+│   ├── adapters/
+│   │   ├── __init__.py
+│   │   └── openmaic_adapter.py   # OpenMAIC HTTP client
+│   ├── generators/
+│   │   ├── __init__.py
+│   │   └── requirement_builder.py  # Builds requirement strings
+│   ├── models/
+│   │   ├── __init__.py
+│   │   └── schemas.py      # Pydantic request/response models
+│   └── utils/
+│       ├── __init__.py
+│       └── data_fetcher.py # PySUS data fetching
+├── tests/
+│   ├── __init__.py
+│   └── test_basic.py
+├── scripts/
+│   └── demo.py             # End-to-end demo
+└── docs/
+    ├── ARCHITECTURE.md
+    ├── IMPLEMENTATION_PLAN.md
+    └── USE_CASES.md
 ```
 
 ---
 
-## 🛤️ Implementation Roadmap
+## Development
 
-### Phase 1: Foundation (Weeks 1-4)
-- [ ] Basic API integration between EpidBot ↔ OpenMAIC
-- [ ] Content generator for dengue surveillance
-- [ ] Simple quiz generation from SINAN data
-- [ ] Proof-of-concept classroom
+### Code Formatting
 
-### Phase 2: Core Features (Weeks 5-12)
+```bash
+uv run ruff format src/ tests/
+```
+
+### Linting
+
+```bash
+uv run ruff check src/ tests/
+```
+
+### Type Checking
+
+```bash
+uv run mypy src/
+```
+
+---
+
+## Architecture
+
+```
+User Request
+     │
+     ▼
+┌─────────────────────────────────────────┐
+│         EpidBot-OpenMAIC Bridge          │
+│                                         │
+│  1. Fetch SINAN data via PySUS          │
+│  2. Summarize statistics                │
+│  3. Build rich requirement string       │
+│  4. Submit to OpenMAIC API              │
+│                                         │
+└────────────────┬────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────┐
+│              OpenMAIC                    │
+│                                         │
+│  POST /api/generate-classroom          │
+│  → Generates slides, quizzes, agents   │
+│  → Returns classroom URL                │
+└─────────────────────────────────────────┘
+```
+
+---
+
+## Roadmap
+
+### Phase 1 (Current - MVP)
+- [x] Basic project structure
+- [x] FastAPI service
+- [x] OpenMAIC adapter
+- [x] Dengue data fetching via PySUS
+- [x] Requirement builder
+- [x] Basic tests
+
+### Phase 2 (Next)
 - [ ] Multi-disease support (Zika, Chikungunya, COVID-19)
+- [ ] Enhanced requirement templates
+- [ ] Data visualization generation
+- [ ] Error handling improvements
+
+### Phase 3 (Future)
 - [ ] Interactive outbreak simulations
-- [ ] AI classmates with EpidBot data access
-- [ ] Export to PPTX and HTML
-
-### Phase 3: Production (Weeks 13-20)
-- [ ] Real-time dashboard integration
-- [ ] Advanced analytics and reporting
-- [ ] Certification system
-- [ ] Pilot deployment with health departments
-
-📖 **See [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for detailed roadmap**
+- [ ] Real-time data integration
+- [ ] Export to PPTX/PDF
+- [ ] LMS integration (Moodle)
 
 ---
 
-## 💡 Example Use Cases
+## Contributing
 
-### 1. Training Health Agents
-```
-User: "Create a 2-hour training on dengue surveillance"
+We welcome contributions! Priority areas:
 
-System:
-1. Fetches latest SINAN data via EpidBot
-2. Generates slides with real case numbers
-3. Creates outbreak simulation scenario
-4. Prepares quiz on current risk factors
-5. Launches OpenMAIC classroom
-6. AI teacher presents using live data
-```
-
-### 2. University Course Module
-```
-Professor: "Generate week 3 materials on arbovirus epidemiology"
-
-System:
-1. Analyzes PAHO surveillance data
-2. Creates comparative case studies (Brazil, Colombia, Argentina)
-3. Generates interactive vector control simulation
-4. Sets up AI classmates for group discussions
-5. Exports complete module to LMS
-```
-
-### 3. Emergency Response Workshop
-```
-Manager: "Emergency workshop on Zika outbreak response"
-
-System:
-1. Retrieves real-time outbreak data
-2. Creates time-pressured scenario simulation
-3. Configures AI roles (surveillance team, field agents, etc.)
-4. Tracks decision-making metrics
-5. Generates post-training report
-```
-
-📖 **See [docs/USE_CASES.md](docs/USE_CASES.md) for full scenarios**
+- Multi-disease support
+- Improved requirement templates
+- Test coverage
+- Documentation
 
 ---
 
-## 🏗️ Architecture
+## License
 
-```mermaid
-graph TB
-    subgraph "EpidBot Ecosystem"
-        EB[EpidBot AI]
-        EA[epidemiological-datasets]
-        ED[Epidemic Data APIs]
-    end
-    
-    subgraph "Integration Layer"
-        INT[EpidBot-OpenMAIC Bridge]
-        CG[Content Generators]
-        AD[OpenClaw Adapters]
-    end
-    
-    subgraph "OpenMAIC Platform"
-        OM[OpenMAIC Core]
-        AI[AI Teachers & Classmates]
-        UI[Interactive UI]
-    end
-    
-    EB --> INT
-    EA --> INT
-    ED --> INT
-    INT --> CG
-    CG --> AD
-    AD --> OM
-    OM --> AI
-    OM --> UI
-```
-
-📖 **See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed design**
+MIT License - see [LICENSE](LICENSE) file.
 
 ---
 
-## 🤝 Contributing
+## Acknowledgments
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### Priority Areas
-- 🎨 UI/UX improvements
-- 📊 New data source integrations
-- 🌍 Multi-language support
-- 🧪 Test coverage
-- 📚 Documentation
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see [LICENSE](LICENSE) file.
-
----
-
-## 🙏 Acknowledgments
-
-- [OpenMAIC](https://github.com/THU-MAIC/OpenMAIC) team at Tsinghua University
-- [EpidBot](https://github.com/Deeplearn-PeD/EpiDBot) team at Kwar-AI
-- [epidemiological-datasets](https://github.com/fccoelho/epidemiological-datasets) contributors
-- All open-source epidemiology projects we build upon
-
----
-
-## 📞 Contact
-
-- **Issues:** [GitHub Issues](https://github.com/deeplearn/EpidBot-OpenMAIC/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/deeplearn/EpidBot-OpenMAIC/discussions)
-- **Email:** contact@kwar-ai.com.br
-
----
-
-<p align="center">
-  <i>Building the future of AI-powered public health education 🌍</i>
-</p>
+- [OpenMAIC](https://github.com/THU-MAIC/OpenMAIC) - Tsinghua University
+- [EpidBot](https://github.com/Deelearn-PeD/EpiDBot) - Kwar-AI
+- [PySUS](https://github.com/AlertaDengue/PySUS) - Alerta Dengue
