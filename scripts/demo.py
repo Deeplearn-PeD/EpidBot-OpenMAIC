@@ -16,7 +16,7 @@ import sys
 
 import httpx
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:8765"
 
 
 async def demo():
@@ -39,8 +39,9 @@ async def demo():
 
         # 2. Submit training generation
         print("\n[2] Submitting dengue training generation request...")
-        print("    Region: São Paulo")
+        print("    Region: São Paulo (municipality)")
         print("    Year: 2024")
+        print("    Note: Using municipality code for faster download")
 
         try:
             response = await client.post(
@@ -49,6 +50,7 @@ async def demo():
                     "region": "São Paulo",
                     "year": 2024,
                     "state": "SP",
+                    "municipality_code": "355030",  # São Paulo city - much faster than entire state
                     "language": "pt-BR",
                     "target_audience": "agentes de saúde",
                 },

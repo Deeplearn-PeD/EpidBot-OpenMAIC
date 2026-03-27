@@ -50,3 +50,4 @@ htmlcov/
 
 # Project specific
 *.log
+logs/

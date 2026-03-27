@@ -1,4 +1,8 @@
+import logging
+
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class OpenMAICAdapter:
@@ -8,6 +12,7 @@ class OpenMAICAdapter:
 
     def __init__(self, base_url: str = "http://localhost:3000"):
         self.base_url = base_url.rstrip("/")
+        logger.info(f"OpenMAICAdapter initialized with base_url={self.base_url}")
 
     async def generate_classroom(
         self,
@@ -26,17 +31,26 @@ class OpenMAICAdapter:
         Returns:
             Response containing jobId for polling
         """
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                f"{self.base_url}/api/generate-classroom",
-                json={
-                    "requirement": requirement,
-                    "language": language,
-                    "enableWebSearch": enable_web_search,
-                },
-            )
-            response.raise_for_status()
-            return response.json()
+        logger.info(
+            f"Submitting classroom generation to OpenMAIC: {self.base_url}/api/generate-classroom"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/generate-classroom",
+                    json={
+                        "requirement": requirement,
+                        "language": language,
+                        "enableWebSearch": enable_web_search,
+                    },
+                )
+                response.raise_for_status()
+                result = response.json()
+                logger.info(f"OpenMAIC response: {result}")
+                return result
+        except Exception as e:
+            logger.exception(f"Error calling OpenMAIC generate_classroom: {e}")
+            raise
 
     async def poll_job(self, job_id: str) -> dict:
         """
@@ -48,10 +62,17 @@ class OpenMAICAdapter:
         Returns:
             Job status information
         """
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(f"{self.base_url}/api/generate-classroom/{job_id}")
-            response.raise_for_status()
-            return response.json()
+        logger.debug(f"Polling job {job_id}")
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(f"{self.base_url}/api/generate-classroom/{job_id}")
+                response.raise_for_status()
+                result = response.json()
+                logger.debug(f"Job {job_id} status: {result.get('status', 'unknown')}")
+                return result
+        except Exception as e:
+            logger.exception(f"Error polling job {job_id}: {e}")
+            raise
 
     async def get_classroom(self, classroom_id: str) -> dict:
         """
@@ -63,13 +84,20 @@ class OpenMAICAdapter:
         Returns:
             Classroom data
         """
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
-                f"{self.base_url}/api/classroom",
-                params={"id": classroom_id},
-            )
-            response.raise_for_status()
-            return response.json()
+        logger.info(f"Fetching classroom {classroom_id}")
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    f"{self.base_url}/api/classroom",
+                    params={"id": classroom_id},
+                )
+                response.raise_for_status()
+                result = response.json()
+                logger.info(f"Classroom {classroom_id} retrieved successfully")
+                return result
+        except Exception as e:
+            logger.exception(f"Error getting classroom {classroom_id}: {e}")
+            raise
 
     async def health_check(self) -> dict:
         """
@@ -78,7 +106,14 @@ class OpenMAICAdapter:
         Returns:
             Health status information
         """
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(f"{self.base_url}/api/health")
-            response.raise_for_status()
-            return response.json()
+        logger.debug(f"Checking OpenMAIC health at {self.base_url}/api/health")
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(f"{self.base_url}/api/health")
+                response.raise_for_status()
+                result = response.json()
+                logger.debug(f"OpenMAIC health check passed")
+                return result
+        except Exception as e:
+            logger.error(f"OpenMAIC health check failed: {e}")
+            raise
