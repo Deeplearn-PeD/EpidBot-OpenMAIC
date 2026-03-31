@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from src.adapters.epidbot_adapter import EpidBotAdapter
 from src.adapters.openmaic_adapter import OpenMAICAdapter
 from src.config import settings
 from src.generators.requirement_builder import RequirementBuilder
@@ -22,6 +23,7 @@ from src.models.schemas import (
     DataSummary,
 )
 from src.utils.data_fetcher import DengueDataFetcher
+from src.utils.epidbot_response_parser import EpidBotResponseParser
 
 
 def setup_logging():
@@ -66,17 +68,30 @@ def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
 sys.excepthook = handle_uncaught_exception
 
 openmaic_adapter: OpenMAICAdapter | None = None
+epidbot_adapter: EpidBotAdapter | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global openmaic_adapter
+    global openmaic_adapter, epidbot_adapter
     try:
         logger.info(
             f"Starting EpidBot-OpenMAIC Bridge service, connecting to OpenMAIC at {settings.OPENMAIC_URL}"
         )
         openmaic_adapter = OpenMAICAdapter(base_url=settings.OPENMAIC_URL)
         logger.info("OpenMAIC adapter initialized")
+
+        if settings.EPIDBOT_API_KEY:
+            logger.info(f"Connecting to EpidBot at {settings.EPIDBOT_URL}")
+            epidbot_adapter = EpidBotAdapter(
+                base_url=settings.EPIDBOT_URL,
+                api_key=settings.EPIDBOT_API_KEY,
+            )
+            await epidbot_adapter.create_session()
+            logger.info("EpidBot adapter initialized")
+        else:
+            logger.warning("EPIDBOT_API_KEY not set, EpidBot integration disabled")
+
         yield
         logger.info("Shutting down EpidBot-OpenMAIC Bridge service")
     except Exception as e:
@@ -115,6 +130,8 @@ async def health():
     """Health check endpoint."""
     logger.info("Health check requested")
     openmaic_connected = None
+    epidbot_connected = None
+
     if openmaic_adapter:
         try:
             await openmaic_adapter.health_check()
@@ -123,10 +140,19 @@ async def health():
             logger.error(f"OpenMAIC health check failed: {e}")
             openmaic_connected = False
 
+    if epidbot_adapter:
+        try:
+            await epidbot_adapter.health_check()
+            epidbot_connected = True
+        except Exception as e:
+            logger.error(f"EpidBot health check failed: {e}")
+            epidbot_connected = False
+
     return HealthResponse(
         status="ok",
         service="epidbot-openmaic-bridge",
         openmaic_connected=openmaic_connected,
+        epidbot_connected=epidbot_connected,
     )
 
 
@@ -151,32 +177,64 @@ async def generate_dengue_training(request: GenerateTrainingRequest):
         raise HTTPException(status_code=503, detail="OpenMAIC adapter not initialized")
 
     try:
-        logger.info("Fetching dengue data from SINAN")
-        logger.info(f"Fetch timeout set to {settings.PYSUS_FETCH_TIMEOUT} seconds")
-        fetcher = DengueDataFetcher(cache_dir=settings.PYSUS_DATA_PATH)
+        summary = None
+        data_source = None
 
-        try:
-            df = await asyncio.wait_for(
-                fetcher.fetch_dengue_data(
-                    year=request.year,
-                    state=request.state,
-                    municipality_code=request.municipality_code,
-                ),
-                timeout=settings.PYSUS_FETCH_TIMEOUT,
-            )
-        except asyncio.TimeoutError:
-            logger.error(
-                f"Data fetch timed out after {settings.PYSUS_FETCH_TIMEOUT} seconds. "
-                "Try using a municipality_code instead of state for faster results."
-            )
-            raise HTTPException(
-                status_code=504,
-                detail=f"Data fetch timed out after {settings.PYSUS_FETCH_TIMEOUT} seconds. "
-                "The dataset may be too large. Try filtering by municipality_code.",
+        if epidbot_adapter:
+            try:
+                logger.info("Fetching dengue data from EpidBot")
+                region_desc = request.municipality_code or request.state or request.region
+                prompt = (
+                    f"Get dengue surveillance data for {region_desc}, Brazil, year {request.year}. "
+                    "Return as markdown table with columns: metric, value. "
+                    "Include: total_cases, deaths, hospitalizations, fatality_rate."
+                )
+                response = await epidbot_adapter.chat(prompt)
+                summary = EpidBotResponseParser.parse_dengue_summary(response)
+                if summary:
+                    data_source = "epidbot"
+                    logger.info(
+                        f"EpidBot summary parsed: {summary['total_cases']} cases, {summary['deaths']} deaths"
+                    )
+                else:
+                    logger.warning("EpidBot returned incomplete data, falling back to PySUS")
+            except Exception as e:
+                logger.warning(f"EpidBot failed, falling back to PySUS: {e}")
+
+        if summary is None:
+            logger.info("Fetching dengue data from SINAN via PySUS")
+            logger.info(f"Fetch timeout set to {settings.PYSUS_FETCH_TIMEOUT} seconds")
+            fetcher = DengueDataFetcher(cache_dir=settings.PYSUS_DATA_PATH)
+
+            try:
+                df = await asyncio.wait_for(
+                    fetcher.fetch_dengue_data(
+                        year=request.year,
+                        state=request.state,
+                        municipality_code=request.municipality_code,
+                    ),
+                    timeout=settings.PYSUS_FETCH_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    f"Data fetch timed out after {settings.PYSUS_FETCH_TIMEOUT} seconds. "
+                    "Try using a municipality_code instead of state for faster results."
+                )
+                raise HTTPException(
+                    status_code=504,
+                    detail=f"Data fetch timed out after {settings.PYSUS_FETCH_TIMEOUT} seconds. "
+                    "The dataset may be too large. Try filtering by municipality_code.",
+                )
+
+            summary = fetcher.summarize(df)
+            data_source = "pysus"
+            logger.info(
+                f"PySUS summary: {summary['total_cases']} cases, {summary['deaths']} deaths"
             )
 
-        summary = fetcher.summarize(df)
-        logger.info(f"Data summary: {summary['total_cases']} cases, {summary['deaths']} deaths")
+        logger.info(
+            f"Data summary ({data_source}): {summary['total_cases']} cases, {summary['deaths']} deaths"
+        )
 
         if summary["total_cases"] == 0:
             logger.warning(f"No dengue data found for {request.region} in {request.year}")

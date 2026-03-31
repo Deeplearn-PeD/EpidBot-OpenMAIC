@@ -79,3 +79,4 @@ class HealthResponse(BaseModel):
     status: str
     service: str
     openmaic_connected: bool | None = None
+    epidbot_connected: bool | None = None

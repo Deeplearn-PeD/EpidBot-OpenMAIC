@@ -5,6 +5,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env")
 
     OPENMAIC_URL: str = "http://localhost:3000"
+    EPIDBOT_URL: str = "https://api.epidbot.kwar-ai.com.br"
+    EPIDBOT_API_KEY: str = ""
     PYSUS_DATA_PATH: str = "~/pysus"
     PYSUS_DOWNLOAD_TIMEOUT: int = 600
     PYSUS_FETCH_TIMEOUT: int = 300  # Timeout for fetching data from SINAN (seconds)
