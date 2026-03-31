@@ -190,60 +190,73 @@ class LessonGenerator:
 
 ### 3. EpidBot Adapter
 
-**Purpose:** Interface with EpidBot AI and data sources
+**Purpose:** Interface with EpidBot AI via session-based chat API
 
 ```python
 # src/adapters/epidbot_adapter.py
 
 class EpidBotAdapter:
     """
-    Adapter for EpidBot API and epidemiological-datasets library.
+    HTTP client for EpidBot Chat API.
+    Uses session-based chat to maintain context across requests.
     """
     
-    def __init__(self, api_key: str, base_url: str):
-        self.client = EpidBotClient(api_key, base_url)
-        self.data_accessors = self._initialize_accessors()
+    def __init__(self, base_url: str, api_key: str):
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self._session_id: int | None = None
         
-    async def get_surveillance_data(
-        self,
-        disease: str,
-        region: str,
-        timeframe: str
-    ) -> SurveillanceData:
-        """
-        Fetch comprehensive surveillance data.
-        """
-        # Use appropriate accessor based on region
-        accessor = self._get_accessor_for_region(region)
-        
-        raw_data = await accessor.fetch(
-            disease=disease,
-            region=region,
-            start_date=timeframe.start,
-            end_date=timeframe.end
-        )
-        
-        # Process and enrich with EpidBot AI
-        insights = await self.client.analyze(raw_data)
-        
-        return SurveillanceData(
-            raw=raw_data,
-            insights=insights,
-            trends=self._calculate_trends(raw_data),
-            risk_assessment=insights.risk_level
-        )
-        
-    def _get_accessor_for_region(self, region: str) -> DataAccessor:
-        """Select appropriate data accessor for region."""
-        region_map = {
-            "brazil": BrazilSINANAccessor(),
-            "colombia": ColombiaINSAccessor(),
-            "usa": CDCWonderAccessor(),
-            "global": WHOAccessor(),
-            # ... more
+    def _get_headers(self) -> dict:
+        return {
+            "X-API-Key": self.api_key,
+            "Content-Type": "application/json",
         }
-        return region_map.get(region.lower(), WHOAccessor())
+        
+    async def create_session(self, name: str = "openmaic-bridge") -> int:
+        """Create a new chat session."""
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.base_url}/api/v1/sessions",
+                json={"name": name},
+                headers=self._get_headers(),
+            )
+            result = response.json()
+            self._session_id = result["id"]
+            return self._session_id
+            
+    async def chat(self, message: str) -> str:
+        """Send a chat message and get the response."""
+        async with httpx.AsyncClient(timeout=600.0) as client:
+            response = await client.post(
+                f"{self.base_url}/api/v1/chat",
+                json={
+                    "message": message,
+                    "session_id": self._session_id,
+                },
+                headers=self._get_headers(),
+            )
+            result = response.json()
+            return result.get("content", "")
+            
+    async def health_check(self) -> bool:
+        """Check if EpidBot server is healthy."""
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{self.base_url}/api/v1/health",
+                headers={"X-API-Key": self.api_key},
+            )
+            response.raise_for_status()
+            return True
 ```
+
+**API Endpoints:**
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/sessions` | POST | Create a new chat session |
+| `/api/v1/chat` | POST | Send a message in a session |
+| `/api/v1/health` | GET | Health check |
+
+**Authentication:** All requests require `X-API-Key` header
 
 ### 4. OpenMAIC Adapter
 

@@ -40,6 +40,7 @@ The bridge fetches real epidemiological data, generates rich training content, a
 1. **Python 3.12+**
 2. **uv** package manager ([install guide](https://docs.astral.sh/uv/))
 3. **OpenMAIC** running at `localhost:3000` (or configure `OPENMAIC_URL`)
+4. **EpidBot** API key (configure `EPIDBOT_API_KEY`)
 
 ---
 
@@ -65,6 +66,10 @@ Edit `.env` if needed:
 ```bash
 # OpenMAIC Configuration
 OPENMAIC_URL=http://localhost:3000
+
+# EpidBot Configuration
+EPIDBOT_URL=https://api.epidbot.kwar-ai.com.br
+EPIDBOT_API_KEY=your-epidbot-api-key
 
 # PySUS Data Cache Directory
 PYSUS_DATA_PATH=~/pysus
@@ -95,7 +100,8 @@ Expected response:
 {
   "status": "ok",
   "service": "epidbot-openmaic-bridge",
-  "openmaic_connected": true
+  "openmaic_connected": true,
+  "epidbot_connected": true
 }
 ```
 
@@ -191,6 +197,44 @@ GET /api/classroom/{classroom_id}
 ```
 
 Retrieve the full classroom data after generation completes.
+
+---
+
+## EpidBot API Integration
+
+The bridge connects to EpidBot via its REST API to leverage epidemiological AI capabilities.
+
+### Configuration
+
+```bash
+EPIDBOT_URL=https://api.epidbot.kwar-ai.com.br
+EPIDBOT_API_KEY=your-api-key
+```
+
+### EpidBot Adapter
+
+The `EpidBotAdapter` class provides:
+
+| Method | Description |
+|--------|-------------|
+| `create_session()` | Create a new chat session |
+| `chat(message)` | Send a message and receive AI response |
+| `health_check()` | Verify EpidBot connectivity |
+
+### API Endpoints Used
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/v1/sessions` | POST | Create chat session |
+| `/api/v1/chat` | POST | Send chat message |
+| `/api/v1/health` | GET | Health check |
+
+### Authentication
+
+All requests require the `X-API-Key` header:
+```bash
+curl -H "X-API-Key: your-api-key" https://api.epidbot.kwar-ai.com.br/api/v1/health
+```
 
 ---
 
