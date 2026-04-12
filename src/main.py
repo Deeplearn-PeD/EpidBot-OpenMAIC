@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.adapters.epidbot_adapter import EpidBotAdapter
 from src.adapters.openmaic_adapter import OpenMAICAdapter
@@ -21,6 +21,9 @@ from src.models.schemas import (
     HealthResponse,
     JobStatusResponse,
     DataSummary,
+    SaveClassroomRequest,
+    SaveClassroomResponse,
+    ChatStreamRequest,
 )
 from src.utils.data_fetcher import DengueDataFetcher
 from src.utils.epidbot_response_parser import EpidBotResponseParser
@@ -257,6 +260,12 @@ async def generate_dengue_training(request: GenerateTrainingRequest):
         result = await openmaic_adapter.generate_classroom(
             requirement=requirement,
             language=request.language,
+            enable_web_search=request.enable_web_search,
+            enable_image_generation=request.enable_image_generation,
+            enable_video_generation=request.enable_video_generation,
+            enable_tts=request.enable_tts,
+            agent_mode=request.agent_mode,
+            pdf_content=request.pdf_content,
         )
 
         job_id = result.get("jobId") or result.get("job_id")
@@ -304,13 +313,28 @@ async def get_job_status(job_id: str):
         result = await openmaic_adapter.poll_job(job_id)
         logger.info(f"Job {job_id} status: {result.get('status', 'unknown')}")
 
+        # Extract classroom info from result if available
+        job_result = result.get("result", {})
+        classroom_url = (
+            result.get("classroomUrl")
+            or result.get("classroom_url")
+            or job_result.get("url")
+        )
+        classroom_id = (
+            result.get("classroomId")
+            or result.get("classroom_id")
+            or job_result.get("classroomId")
+        )
+
         return JobStatusResponse(
             job_id=job_id,
             status=result.get("status", "unknown"),
             progress=result.get("progress"),
-            classroom_url=result.get("classroomUrl") or result.get("classroom_url"),
-            classroom_id=result.get("classroomId") or result.get("classroom_id"),
+            classroom_url=classroom_url,
+            classroom_id=classroom_id,
             error=result.get("error"),
+            scenes_generated=result.get("scenesGenerated") or result.get("scenes_generated"),
+            done=result.get("done"),
         )
 
     except httpx.HTTPStatusError as e:
@@ -355,6 +379,97 @@ async def get_classroom(classroom_id: str):
     except Exception as e:
         logger.exception(f"Error getting classroom {classroom_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error getting classroom: {str(e)}")
+
+
+@app.post("/api/save-classroom", response_model=SaveClassroomResponse)
+async def save_classroom(request: SaveClassroomRequest):
+    """
+    Save a generated classroom to OpenMAIC persistent storage.
+
+    This endpoint stores a classroom with its stage configuration and scenes,
+    returning a permanent URL for access.
+    """
+    logger.info("Saving classroom to OpenMAIC")
+
+    if not openmaic_adapter:
+        logger.error("OpenMAIC adapter not initialized")
+        raise HTTPException(status_code=503, detail="OpenMAIC adapter not initialized")
+
+    try:
+        result = await openmaic_adapter.save_classroom(
+            stage=request.stage,
+            scenes=request.scenes,
+        )
+        data = result.get("data", {})
+        classroom_id = data.get("id")
+        classroom_url = data.get("url")
+
+        if not classroom_id or not classroom_url:
+            logger.error(f"OpenMAIC did not return classroom URL: {result}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"OpenMAIC did not return classroom URL: {result}",
+            )
+
+        logger.info(f"Classroom saved: id={classroom_id}, url={classroom_url}")
+        return SaveClassroomResponse(id=classroom_id, url=classroom_url)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error saving classroom: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error saving classroom: {str(e)}")
+
+
+@app.post("/api/chat-stream")
+async def chat_stream(request: ChatStreamRequest):
+    """
+    Stateless chat with OpenMAIC using SSE streaming.
+
+    This endpoint sends messages to the OpenMAIC chat API and streams back
+    events in Server-Sent Events (SSE) format.
+
+    Events include:
+    - text: Text delta from an agent
+    - tool_call: Tool invocation
+    - tool_result: Tool result
+    - error: Error message
+    - done: Stream complete
+
+    The client is responsible for managing conversation state and aborting.
+    """
+    logger.info(f"Starting chat stream with {len(request.messages)} messages")
+
+    if not openmaic_adapter:
+        logger.error("OpenMAIC adapter not initialized")
+        raise HTTPException(status_code=503, detail="OpenMAIC adapter not initialized")
+
+    async def event_generator():
+        try:
+            async for event in openmaic_adapter.chat_stream(
+                messages=request.messages,
+                store_state=request.store_state,
+                config=request.config,
+                api_key=request.api_key,
+                base_url=request.base_url_provider,
+                model=request.model,
+                provider_type=request.provider_type,
+            ):
+                yield f"data: {event}\n\n"
+        except Exception as e:
+            logger.exception(f"Error in chat stream generator: {e}")
+            error_event = {"type": "error", "data": {"message": str(e)}}
+            yield f"data: {error_event}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def run_server():
